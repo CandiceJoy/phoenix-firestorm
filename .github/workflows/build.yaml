@@ -11,15 +11,9 @@ jobs:
   build:
     strategy:
       matrix:
-        runner: [windows-large, macos-12-xl]
-        configuration: [Release, ReleaseOS]
+        runner: [windows-large]
+        configuration: [Release, releaseOS]
         python-version: ["3.11"]
-        include:
-          - runner: macos-12-xl
-            developer_dir: "/Applications/Xcode_14.0.1.app/Contents/Developer"
-        exclude:
-          - runner: macos-12-xl
-            configuration: ReleaseOS
     runs-on: ${{ matrix.runner }}
     outputs:
       viewer_channel: ${{ steps.build.outputs.viewer_channel }}
@@ -262,41 +256,6 @@ jobs:
           client_secret: "${{ secrets.AZURE_CLIENT_SECRET }}"
           tenant_id: "${{ secrets.AZURE_TENANT_ID }}"
 
-  sign-and-package-mac:
-    needs: build
-    runs-on: macos-latest
-    steps:
-      - name: Unpack Mac notarization credentials
-        id: note-creds
-        shell: bash
-        run: |
-          # In NOTARIZE_CREDS_MACOS we expect to find:
-          # USERNAME="..."
-          # PASSWORD="..."
-          # TEAM_ID="..."
-          eval "${{ secrets.NOTARIZE_CREDS_MACOS }}"
-          echo "::add-mask::$USERNAME"
-          echo "::add-mask::$PASSWORD"
-          echo "::add-mask::$TEAM_ID"
-          echo "note_user=$USERNAME" >> "$GITHUB_OUTPUT"
-          echo "note_pass=$PASSWORD" >> "$GITHUB_OUTPUT"
-          echo "note_team=$TEAM_ID" >> "$GITHUB_OUTPUT"
-          # If we didn't manage to retrieve all of these credentials, better
-          # find out sooner than later.
-          [[ -n "$USERNAME" && -n "$PASSWORD" && -n "$TEAM_ID" ]]
-
-      - name: Sign and package Mac viewer
-        uses: secondlife/viewer-build-util/sign-pkg-mac@v1
-        with:
-          channel: ${{ needs.build.outputs.viewer_channel }}
-          imagename: ${{ needs.build.outputs.imagename }}
-          cert_base64: ${{ secrets.SIGNING_CERT_MACOS }}
-          cert_name: ${{ secrets.SIGNING_CERT_MACOS_IDENTITY }}
-          cert_pass: ${{ secrets.SIGNING_CERT_MACOS_PASSWORD }}
-          note_user: ${{ steps.note-creds.outputs.note_user }}
-          note_pass: ${{ steps.note-creds.outputs.note_pass }}
-          note_team: ${{ steps.note-creds.outputs.note_team }}
-
   post-windows-symbols:
     needs: build
     runs-on: ubuntu-latest
@@ -310,21 +269,8 @@ jobs:
           channel: ${{ needs.build.outputs.viewer_channel }}
           version: ${{ needs.build.outputs.viewer_version }}
 
-  post-mac-symbols:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Post Mac symbols
-        uses: secondlife/viewer-build-util/post-bugsplat-mac@v1
-        with:
-          username: ${{ secrets.BUGSPLAT_USER }}
-          password: ${{ secrets.BUGSPLAT_PASS }}
-          database: "SecondLife_Viewer_2018"
-          channel: ${{ needs.build.outputs.viewer_channel }}
-          version: ${{ needs.build.outputs.viewer_version }}
-
   release:
-    needs: [sign-and-package-windows, sign-and-package-mac]
+    needs: [sign-and-package-windows]
     runs-on: ubuntu-latest
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'Second_Life_')
     steps:
@@ -334,25 +280,12 @@ jobs:
 
       - uses: actions/download-artifact@v3
         with:
-          name: macOS-installer
-
-      - uses: actions/download-artifact@v3
-        with:
           name: Windows-metadata
 
       - name: Rename windows metadata 
         run: |
           mv autobuild-package.xml Windows-autobuild-package.xml
           mv newview/viewer_version.txt Windows-viewer_version.txt
-
-      - uses: actions/download-artifact@v3
-        with:
-          name: macOS-metadata
-
-      - name: Rename macOS metadata 
-        run: |
-          mv autobuild-package.xml macOS-autobuild-package.xml
-          mv newview/viewer_version.txt macOS-viewer_version.txt
 
       # forked from softprops/action-gh-release
       - uses: secondlife-3p/action-gh-release@v1
